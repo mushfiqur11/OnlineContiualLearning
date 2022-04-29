@@ -1,0 +1,24 @@
+datasets:
+  - MNIST: "./data/MNIST_data/"
+    - URL = "http://yann.lecun.com/exdb/mnist/"
+  - CIFAR: "./data/CIFAR_data/"
+    - URL = "http://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
+  - miniImageNet: "./data/miniImageNet_Dataset/"
+    - URL = "https://www.dropbox.com/s/yt3akdfchuafk25/miniImageNet_full.pickle?dl=0"
+
+dependencies:
+  - cudatoolkit=9.0
+  - python=3.6.12
+  - pip:
+    - matplotlib==3.3.4
+    - numpy==1.19.2
+    - opencv-python==4.5.1.48
+    - pandas==1.1.5
+    - pillow==8.2.0
+    - scikit-learn==0.24.2
+    - scipy==1.5.2
+    - seaborn==0.11.1
+    - six==1.15.0
+    - sklearn==0.0
+    - tensorboard==1.12.2
+    - tensorflow-gpu==1.12.0
