@@ -7,6 +7,7 @@ datasets:
     - URL = "https://www.dropbox.com/s/yt3akdfchuafk25/miniImageNet_full.pickle?dl=0"
 
 dependencies:
+
   - cudatoolkit=9.0
   - python=3.6.12
   - pip:
