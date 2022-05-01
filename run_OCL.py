@@ -4,6 +4,7 @@ import numpy as np
 import datetime
 from tensorflow.contrib.learn.python.learn.datasets.mnist import DataSet
 from tensorflow.contrib.learn.python.learn.datasets import base
+# import tf.keras.datasets.mnist as DataSet
 from tensorflow.python.framework import dtypes
 from tensorflow.examples.tutorials.mnist import input_data
 import os
@@ -20,13 +21,14 @@ from six.moves.urllib.request import urlretrieve
 import tarfile
 import zipfile
 
+tf.enable_eager_execution()
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # ignore warning
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # use gpu
 
 VALID_OPTIMS = ['SGD', 'MOMENTUM', 'ADAM']
 VALID_ARCHS = ['mlp', 'lenet', 'resnet18']
-# VALID_MODELS = ['SGD','MTL','STL','RLL']
-VALID_MODELS = ['SGD','MTL','STL','RLL','CON']
+VALID_MODELS = ['SGD','MTL','STL','RLL','OCL']
 VALID_DATASETS = ['p-MNIST','r-MNIST','CIFAR','miniImageNet']
 
 def get_arguments():
@@ -70,6 +72,19 @@ def get_arguments():
     parser.add_argument("--log-dir", type=str, default='./log/',
                        help="Directory where the plots and model accuracies will be stored.")
     return parser.parse_args()
+
+# ==================================================
+
+
+
+
+
+
+
+
+
+
+
 
 # ==================================================
 CIFAR_10_URL = "http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
@@ -374,145 +389,120 @@ def train(task_list,task_labels,FLAGS):
         if FLAGS.method=='RLL':
             from Model_RGO import RGO_Net
             Model = RGO_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)
-        elif FLAGS.method=='CON':
-            from Model_CON import CON_Net
-            Model = CON_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)
+        elif FLAGS.method=='OCL':
+            from Model_OCL import OCL_Net
+            Model = OCL_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)
         elif FLAGS.method=='SGD' or FLAGS.method=='MTL' or FLAGS.method=='STL':
             from Model_VAN import SGD_Net
             Model = SGD_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    with tf.Session(graph=g1, config=config) as sess1:
-        # Initialize all variables
-        init = [tf.global_variables_initializer()]#, tf.local_variables_initializer()]
-        sess1.run(init)
-        task_num = len(task_list)
-        accuracy_lists=[]#[[] for i in range(task_num)]
-        train_accuracy_lists=[]
-        loss_lists=[]
-        total_accuracy_list=[]
-        ops=[]
-        for j in range(0, task_num):
-            print("Training Task %d" % (j + 1))
-            ops.append(Model.get_ops(j))
-            # Update the parameters
-            if FLAGS.method == 'STL':
-                init = [tf.global_variables_initializer()]#, tf.local_variables_initializer()]
-                sess1.run(init)
-            epoch = FLAGS.epoch
-            batch_size = FLAGS.batch_size
-            all_data = len(task_list[j].train.labels[:])
-            all_step = all_data*epoch//batch_size
-            if FLAGS.maxstep >0:
-                all_step = FLAGS.maxstep
-            if 'MTL' in FLAGS.method and j==0:
-                # merge all tasks into one task
-                # multiply the total steps as we only train task 0
-                #all_step *= task_num
-                print('multi task merging')
-                train_images = task_list[0].train.images
-                train_labels = task_list[0].train.labels
-                for jj in range(1,task_num):
-                    train_images = np.concatenate((train_images, task_list[jj].train.images),axis=0)
-                    train_labels = np.concatenate((train_labels, task_list[jj].train.labels),axis=0)
-                perm = np.arange(train_labels.shape[0])
-                np.random.shuffle(perm)
-                task_list[0] = base.Datasets(train=DataSet(train_images[perm,:], train_labels[perm],
-                                        dtype=dtypes.uint8, reshape=False), validation=task_list[0].validation, test=task_list[0].test)
-                print('multi task merging end')
+    if 'OCL' in FLAGS.method:
+
+        with tf.Session(graph=g1, config=config) as sess1:
+            # Initialize all variables
+            init = [tf.global_variables_initializer()]#, tf.local_variables_initializer()]
+            sess1.run(init)
+            task_num = len(task_list)
+            print('task num',task_num)
+            accuracy_lists=[]#[[] for i in range(task_num)]
+            train_accuracy_lists=[]
+            loss_lists=[]
+            total_accuracy_list=[]
+            ops=[]
             
-            for current_step in range(all_step):
-                lamda = current_step/all_step
-                #current_step = current_step+1
-                batch_xs, batch_ys = task_list[j].train.next_batch(batch_size)
-                output_mask=np.zeros(FLAGS.num_class)
-                output_mask[task_labels[j]]=1.0
-                if 'MTL' in FLAGS.method:
-                    output_mask[:]=1.0
-                    if j > 0 :
-                        #skip tasks except the merged task 'task0'
-                        break
-                # if FLAGS.method== 'RLL':
-                #     output_mask[:]=1.0
-                feed_dict = {
-                    Model.input_x: batch_xs,
-                    Model.input_y: batch_ys,
-                    Model.output_mask:output_mask,
-                    Model.train_phase:True
-                }
-                acc, loss,  aaa, = sess1.run(ops[j][0:3], feed_dict,)
-                if current_step % (all_step // epoch) == 0:
-                    print("Train->>>Task: [{:d}/{:d}] Step: {:d}/{:d} Train: loss: {:.2f}, acc: {:.2f}  %"
-                        .format(j+1, task_num,current_step*epoch // all_step+1, epoch, loss, acc * 100))
-            print('Task{:d} is trained.'.format(j+1))
-            # if current_step % (all_step // 4) == 0:
-            #     print("Train->>>Task: [{:d}/{:d}] Step: {:d}/{:d} Train: loss: {:.2f}, acc: {:.2f}  %"
-            #             .format(j+1, task_num,current_step*epoch // all_step+1, epoch, loss, acc * 100))
-            # #print(current_step,all_step,FLAGS.evals)
-            # if (current_step % (all_step//FLAGS.evals)) == 0 or (current_step==all_step-1) :
-            accus=[]
-            train_accus=[]
-            losses = []
-            for i_test in range(task_num):
-                output_mask=np.zeros(FLAGS.num_class)
-                output_mask[task_labels[i_test]]=1.0
-                # if FLAGS.method=="MTL":
-                #     output_mask[task_labels[]]=1.0
-                # if FLAGS.method=="MTL":
-                #     output_mask[:] = 1.0
-                all_data = len(task_list[i_test].train.labels[:])
-                all_step = all_data//batch_size
-                accuT,lossT=0.0,0.0
-                for index in range(all_step):
-                    batch_xs, batch_ys = task_list[i_test].train.next_batch(batch_size)
+            for j in range(0, task_num):
+                print("Training Task %d" % (j + 1))
+                ops.append(Model.get_ops(j))
+                # Update the parameters
+                epoch = FLAGS.epoch
+                batch_size = FLAGS.batch_size
+                all_data = len(task_list[j].train.labels[:])
+                all_step = all_data*epoch//batch_size
+                print('all step:',all_step)
+                if FLAGS.maxstep >0:
+                    all_step = FLAGS.maxstep
+                
+                for current_step in range(all_step):
+                    lamda = current_step/all_step
+                    #current_step = current_step+1
+                    batch_xs, batch_ys = task_list[j].train.next_batch(batch_size)
+                    output_mask=np.zeros(FLAGS.num_class)
+                    output_mask[task_labels[j]]=1.0
+
                     feed_dict = {
                         Model.input_x: batch_xs,
                         Model.input_y: batch_ys,
                         Model.output_mask:output_mask,
-                        Model.train_phase:False
+                        Model.train_phase:True
                     }
-                    if i_test<=j:
-                        accu, loss = sess1.run(ops[i_test][0:2], feed_dict)
-                    else:
-                        accu, loss = 0.0 , 0.0
-                    accuT += accu
-                    lossT += loss
-                train_accus.append(accuT/all_step)
+                    acc, loss,  aaa, = sess1.run(ops[j][0:3], feed_dict,)
 
-                all_data = len(task_list[i_test].test.labels[:])
-                all_step = all_data//batch_size
-                accuT,lossT=0.0,0.0
-                for index in range(all_step):
-                    batch_xs, batch_ys = task_list[i_test].test.next_batch(batch_size)
-                    feed_dict = {
-                        Model.input_x: batch_xs,
-                        Model.input_y: batch_ys,
-                        Model.output_mask:output_mask,
-                        Model.train_phase:False
-                    }
-                    if i_test<=j:
-                        accu, loss = sess1.run(ops[i_test][0:2], feed_dict)
-                    else:
-                        accu, loss = 0.0 , 0.0
-                    accuT += accu
-                    lossT += loss
-                accus.append(accuT/all_step)
-                losses.append(lossT/all_step)
+                    Model.optimizer.update_theta(Model.trainable_vars)
 
-            if FLAGS.method=='STL' and j>0:
-                accus[0:j]=accuracy_lists[-1][0:j]
-                train_accus[0:j]=train_accuracy_lists[-1][0:j]
-            accuracy_lists.append(accus)
-            train_accuracy_lists.append(train_accus)
-            loss_lists.append(losses)
-            total_accuracy_list.append(np.mean(accus[0:j+1]))
+                    if current_step % (all_step // epoch) == 0:
+                        print("Train->>>Task: [{:d}/{:d}] Step: {:d}/{:d} Train: loss: {:.2f}, acc: {:.2f}  %"
+                            .format(j+1, task_num,current_step*epoch // all_step+1, epoch, loss, acc * 100))
+                print('Task{:d} is trained.'.format(j+1))
 
-            #print("Test:->>>[{:d}/{:d}], Step: [{:d}/{:d}], acc: {:.2f} %".format(i_test + 1, task_num, current_step*epoch // all_step+1, epoch, accu * 100))
-            print("Test:->>>accuracy of trainset:",100.0*np.array(train_accus))
-            print("Test:->>>accuracy of tasks:",100.0*np.array(accus),"total_accuracy:",total_accuracy_list[-1]*100.0)
-            
-            if FLAGS.method=='RLL':
+
+
+                accus=[]
+                train_accus=[]
+                losses = []
+                for i_test in range(task_num):
+                    output_mask=np.zeros(FLAGS.num_class)
+                    output_mask[task_labels[i_test]]=1.0
+                    # return None
+                    all_data = len(task_list[i_test].train.labels[:])
+                    all_step = all_data//batch_size
+                    accuT,lossT=0.0,0.0
+                    for index in range(all_step):
+                        batch_xs, batch_ys = task_list[i_test].train.next_batch(batch_size)
+                        feed_dict = {
+                            Model.input_x: batch_xs,
+                            Model.input_y: batch_ys,
+                            Model.output_mask:output_mask,
+                            Model.train_phase:False
+                        }
+                        if i_test<=j:
+                            accu, loss = sess1.run(ops[i_test][0:2], feed_dict)
+                        else:
+                            accu, loss = 0.0 , 0.0
+                        accuT += accu
+                        lossT += loss
+                    train_accus.append(accuT/all_step)
+
+                    all_data = len(task_list[i_test].test.labels[:])
+                    all_step = all_data//batch_size
+                    accuT,lossT=0.0,0.0
+                    for index in range(all_step):
+                        batch_xs, batch_ys = task_list[i_test].test.next_batch(batch_size)
+                        feed_dict = {
+                            Model.input_x: batch_xs,
+                            Model.input_y: batch_ys,
+                            Model.output_mask:output_mask,
+                            Model.train_phase:False
+                        }
+                        if i_test<=j:
+                            accu, loss = sess1.run(ops[i_test][0:2], feed_dict)
+                        else:
+                            accu, loss = 0.0 , 0.0
+                        accuT += accu
+                        lossT += loss
+                    accus.append(accuT/all_step)
+                    losses.append(lossT/all_step)
+
+                accuracy_lists.append(accus)
+                train_accuracy_lists.append(train_accus)
+                loss_lists.append(losses)
+                total_accuracy_list.append(np.mean(accus[0:j+1]))
+
+                #print("Test:->>>[{:d}/{:d}], Step: [{:d}/{:d}], acc: {:.2f} %".format(i_test + 1, task_num, current_step*epoch // all_step+1, epoch, accu * 100))
+                print("Test:->>>accuracy of trainset:",100.0*np.array(train_accus))
+                print("Test:->>>accuracy of tasks:",100.0*np.array(accus),"total_accuracy:",total_accuracy_list[-1]*100.0)
+                
                 print('updating P for Recursive Least Loss')
                 update_batch_size = batch_size
                 all_step = all_data//update_batch_size
@@ -531,12 +521,163 @@ def train(task_list,task_labels,FLAGS):
                         Model.train_phase:False
                     }
                     aaa, = sess1.run([Model.update], feed_dict,)
-                    
+                        
                 print('updated P for Recursive Least Loss')
-        # dict_plot={'method':FLAGS.method,'accu':accuracy_lists}
-        # with open("result_cf100_"+FLAGS.method+'1','wb') as f:
-        #     pickle.dump(dict_plot,f)
-        sess1.close()
+
+            sess1.close()
+    else:
+        with tf.Session(graph=g1, config=config) as sess1:
+            # Initialize all variables
+            init = [tf.global_variables_initializer()]#, tf.local_variables_initializer()]
+            sess1.run(init)
+            
+            task_num = len(task_list)
+            accuracy_lists=[]#[[] for i in range(task_num)]
+            train_accuracy_lists=[]
+            loss_lists=[]
+            total_accuracy_list=[]
+            ops=[]
+            for j in range(0, task_num):
+                print("Training Task %d" % (j + 1))
+                ops.append(Model.get_ops(j))
+                # Update the parameters
+                if FLAGS.method == 'STL':
+                    init = [tf.global_variables_initializer()]#, tf.local_variables_initializer()]
+                    sess1.run(init)
+                epoch = FLAGS.epoch
+                batch_size = FLAGS.batch_size
+                all_data = len(task_list[j].train.labels[:])
+                all_step = all_data*epoch//batch_size
+                if FLAGS.maxstep >0:
+                    all_step = FLAGS.maxstep
+                if 'MTL' in FLAGS.method and j==0:
+                    # merge all tasks into one task
+                    # multiply the total steps as we only train task 0
+                    #all_step *= task_num
+                    print('multi task merging')
+                    train_images = task_list[0].train.images
+                    train_labels = task_list[0].train.labels
+                    for jj in range(1,task_num):
+                        train_images = np.concatenate((train_images, task_list[jj].train.images),axis=0)
+                        train_labels = np.concatenate((train_labels, task_list[jj].train.labels),axis=0)
+                    perm = np.arange(train_labels.shape[0])
+                    np.random.shuffle(perm)
+                    task_list[0] = base.Datasets(train=DataSet(train_images[perm,:], train_labels[perm],
+                                            dtype=dtypes.uint8, reshape=False), validation=task_list[0].validation, test=task_list[0].test)
+                    print('multi task merging end')
+                
+                for current_step in range(all_step):
+                    lamda = current_step/all_step
+                    #current_step = current_step+1
+                    batch_xs, batch_ys = task_list[j].train.next_batch(batch_size)
+                    output_mask=np.zeros(FLAGS.num_class)
+                    output_mask[task_labels[j]]=1.0
+                    if 'MTL' in FLAGS.method:
+                        output_mask[:]=1.0
+                        if j > 0 :
+                            #skip tasks except the merged task 'task0'
+                            break
+                    # if FLAGS.method== 'RLL':
+                    #     output_mask[:]=1.0
+                    feed_dict = {
+                        Model.input_x: batch_xs,
+                        Model.input_y: batch_ys,
+                        Model.output_mask:output_mask,
+                        Model.train_phase:True
+                    }
+                    acc, loss,  aaa, = sess1.run(ops[j][0:3], feed_dict,)
+                    if current_step % (all_step // epoch) == 0:
+                        print("Train->>>Task: [{:d}/{:d}] Step: {:d}/{:d} Train: loss: {:.2f}, acc: {:.2f}  %"
+                            .format(j+1, task_num,current_step*epoch // all_step+1, epoch, loss, acc * 100))
+                print('Task{:d} is trained.'.format(j+1))
+                # if current_step % (all_step // 4) == 0:
+                #     print("Train->>>Task: [{:d}/{:d}] Step: {:d}/{:d} Train: loss: {:.2f}, acc: {:.2f}  %"
+                #             .format(j+1, task_num,current_step*epoch // all_step+1, epoch, loss, acc * 100))
+                # #print(current_step,all_step,FLAGS.evals)
+                # if (current_step % (all_step//FLAGS.evals)) == 0 or (current_step==all_step-1) :
+                accus=[]
+                train_accus=[]
+                losses = []
+                for i_test in range(task_num):
+                    output_mask=np.zeros(FLAGS.num_class)
+                    output_mask[task_labels[i_test]]=1.0
+                    all_data = len(task_list[i_test].train.labels[:])
+                    all_step = all_data//batch_size
+                    accuT,lossT=0.0,0.0
+                    for index in range(all_step):
+                        batch_xs, batch_ys = task_list[i_test].train.next_batch(batch_size)
+                        feed_dict = {
+                            Model.input_x: batch_xs,
+                            Model.input_y: batch_ys,
+                            Model.output_mask:output_mask,
+                            Model.train_phase:False
+                        }
+                        if i_test<=j:
+                            accu, loss = sess1.run(ops[i_test][0:2], feed_dict)
+                        else:
+                            accu, loss = 0.0 , 0.0
+                        accuT += accu
+                        lossT += loss
+                    train_accus.append(accuT/all_step)
+
+                    all_data = len(task_list[i_test].test.labels[:])
+                    all_step = all_data//batch_size
+                    accuT,lossT=0.0,0.0
+                    for index in range(all_step):
+                        batch_xs, batch_ys = task_list[i_test].test.next_batch(batch_size)
+                        feed_dict = {
+                            Model.input_x: batch_xs,
+                            Model.input_y: batch_ys,
+                            Model.output_mask:output_mask,
+                            Model.train_phase:False
+                        }
+                        if i_test<=j:
+                            accu, loss = sess1.run(ops[i_test][0:2], feed_dict)
+                        else:
+                            accu, loss = 0.0 , 0.0
+                        accuT += accu
+                        lossT += loss
+                    accus.append(accuT/all_step)
+                    losses.append(lossT/all_step)
+
+                if FLAGS.method=='STL' and j>0:
+                    accus[0:j]=accuracy_lists[-1][0:j]
+                    train_accus[0:j]=train_accuracy_lists[-1][0:j]
+                accuracy_lists.append(accus)
+                train_accuracy_lists.append(train_accus)
+                loss_lists.append(losses)
+                total_accuracy_list.append(np.mean(accus[0:j+1]))
+
+                #print("Test:->>>[{:d}/{:d}], Step: [{:d}/{:d}], acc: {:.2f} %".format(i_test + 1, task_num, current_step*epoch // all_step+1, epoch, accu * 100))
+                print("Test:->>>accuracy of trainset:",100.0*np.array(train_accus))
+                print("Test:->>>accuracy of tasks:",100.0*np.array(accus),"total_accuracy:",total_accuracy_list[-1]*100.0)
+                
+                if FLAGS.method=='RLL':
+                    print('updating P for Recursive Least Loss')
+                    update_batch_size = batch_size
+                    all_step = all_data//update_batch_size
+                    if FLAGS.maxstep >0:
+                        all_step = FLAGS.maxstep*batch_size//update_batch_size
+                    for current_step in range(all_step):
+                        #print(current_step,end=' ')
+                        lamda = current_step/all_step
+                        current_step = current_step+1
+                        batch_xs, batch_ys = task_list[j].train.next_batch(update_batch_size)
+                        output_mask=np.ones(FLAGS.num_class)
+                        feed_dict = {
+                            Model.input_x: batch_xs,
+                            Model.input_y: batch_ys,
+                            Model.output_mask:output_mask,
+                            Model.train_phase:False
+                        }
+                        aaa, = sess1.run([Model.update], feed_dict,)
+                        
+                    print('updated P for Recursive Least Loss')
+                
+            # dict_plot={'method':FLAGS.method,'accu':accuracy_lists}
+            # with open("result_cf100_"+FLAGS.method+'1','wb') as f:
+            #     pickle.dump(dict_plot,f)
+            sess1.close()
     del g1
     return np.array(accuracy_lists),np.array(loss_lists),np.array(train_accuracy_lists)
 
@@ -595,6 +736,7 @@ def main(_):
             task_labels = [task_labels[i*num_classes//FLAGS.num_task : (i+1)*num_classes//FLAGS.num_task] for i in range(FLAGS.num_task)]
             DATA_FILE = '/data/miniImageNet_Dataset/miniImageNet_full.pickle'
             task_list = construct_split_miniImagenet(task_labels,DATA_FILE)
+        # print(FLAGS)
         acculist,losslist,train_acculist = train(task_list,task_labels,FLAGS)
         runs.append(np.array(acculist))
         runs_train.append(np.array(train_acculist))

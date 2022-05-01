@@ -3,6 +3,9 @@
 import math
 import tensorflow as tf
 import numpy as np
+
+tf.enable_eager_execution()
+
 def _shuffle(x,seed):
     if seed==0:
         return x
@@ -144,12 +147,12 @@ def _residual_block_first(x, out_channels, strides, trainable_vars, train_phase,
 import tensorflow as tf
 from numpy.random import seed
 from tensorflow import set_random_seed
-from CON_Optimizer import CON_Optimizer
+from OCL_Optimizer import OCL_Optimizer
 import numpy as np
 
 NEG_INF = -1e32
 
-class CON_Net(object):
+class OCL_Net(object):
     def __init__(self, arch='resnet18',num_classes = 100,dim = [32,32,3],optimizer=tf.train.MomentumOptimizer(0.01, momentum=0.9), seed_num=0):
         seed(seed_num)
         set_random_seed(seed_num)
@@ -214,13 +217,15 @@ class CON_Net(object):
         pruned_logits = tf.where(tf.tile(tf.equal(self.output_mask[None,:], 1.0), [tf.shape(scores)[0], 1]), scores, NEG_INF*tf.ones_like(scores))
 
         if not self.optimizer_initialized:
-            self.optimizer =  CON_Optimizer(optimizer=self._optimizer,network=scores)
+            self.optimizer =  OCL_Optimizer(optimizer=self._optimizer,network=scores)
             self.optimizer_initialized=True
         losses = tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.input_y, 
                 logits=pruned_logits)
         #losses = tf.nn.softmax_cross_entropy_with_logits(logits=scores, labels=self.input_y)
         loss = tf.reduce_mean(losses)
 
+        # print(f'loss: {loss.shape},{loss}')
+        # print(self.trainable_vars)
         back_forward = self.optimizer.minimize(loss,var_list=self.trainable_vars)
         self.update=self.optimizer.update(scores,self.input_y,var_list=self.trainable_vars)
 

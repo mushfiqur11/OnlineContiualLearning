@@ -374,9 +374,6 @@ def train(task_list,task_labels,FLAGS):
         if FLAGS.method=='RLL':
             from Model_RGO import RGO_Net
             Model = RGO_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)
-        elif FLAGS.method=='CON':
-            from Model_CON import CON_Net
-            Model = CON_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)
         elif FLAGS.method=='SGD' or FLAGS.method=='MTL' or FLAGS.method=='STL':
             from Model_VAN import SGD_Net
             Model = SGD_Net(FLAGS.arch,num_classes=FLAGS.num_class,dim = FLAGS.dim, seed_num=FLAGS.seed, optimizer=optimizer)

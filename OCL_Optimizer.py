@@ -1,7 +1,10 @@
+from re import T
 import tensorflow as tf
 import numpy as np
 
-class CON_Optimizer:
+tf.enable_eager_execution()
+
+class OCL_Optimizer:
     def __init__(self, network,alpha=0.01,gamma=1.0,optimizer=tf.train.AdamOptimizer(0.01)):
         self.network=network
         self.optimizer = optimizer
@@ -22,8 +25,17 @@ class CON_Optimizer:
         self.dim_list=[]
 
         self.initialized=False
+        self.update_initialized=False
 
+    def update_theta(self, parameters):
+        self.old_params_list = []
+        for item in parameters:
+            self.old_params_list.append(item)
+        self.update_initialized=True
+        # print("Old theta stored")
+        
     def minimize(self, loss,var_list=None):
+        # print('minimize')
         grad_vars_loss = self.optimizer.compute_gradients(loss,var_list=var_list)
 
         if not self.initialized:
@@ -55,7 +67,18 @@ class CON_Optimizer:
 
             self.P_total_dim=np.sum(self.p_size_list)
 
+            self.H_total_list = []
+            Hessian = tf.hessians(loss,var_list)
+            for h in Hessian:
+                print(h.shape)
+                self.H_total_list.append(tf.zeros(h.shape))
+            print("initialized")
+
             self.initialized=True
+
+        # self.L_total = tf.add(self.L_total,loss)
+        # print('Loss:',loss)
+        # print('Total Loss:',self.L_total)
         
         grad_loss_list=[]
         for grad, _ in grad_vars_loss:
@@ -68,7 +91,7 @@ class CON_Optimizer:
             self.grad_vars.append((grad_loss_list[i],v))
 
         op = [self.optimizer.apply_gradients(self.grad_vars)]
-
+        # print('minimize end')
         return op
     def apply_P(self,P,g,shape):
         #TODO 
@@ -93,11 +116,29 @@ class CON_Optimizer:
 
 
     def update(self,network,y,var_list=None):
-
         y_=tf.where(tf.reduce_sum(y,axis=0,keep_dims=True)>0,x=tf.ones([1,np.shape(y)[1]]),y=tf.zeros([1,np.shape(y)[1]]))
         a=tf.exp(network)*y_/tf.reduce_sum(tf.exp(network)*y_,axis=1,keep_dims=True)
-        grad_vars_net=self.optimizer.compute_gradients(network*y* tf.stop_gradient(tf.sqrt(a-a*a)),var_list=var_list)
-
+        pred = network*y* tf.stop_gradient(tf.sqrt(a-a*a))
+        if self.update_initialized:
+            theta_diff = []
+            for new_v,old_v in zip(var_list,self.old_params_list):
+                theta_diff.append(tf.subtract(new_v,old_v))
+                # print('calculated PPP')
+ 
+            H_list = tf.hessians(a,var_list)
+            for H,Ht,P,A in zip(H_list,self.H_total_list,self.P_list,theta_diff):
+                Ht = tf.add(Ht,H)
+                print('h,p,a',H.shape,'---',P.shape,'---',A.shape)
+                try:
+                    P = tf.multiply(P,A)
+                except:
+                    pass
+                if P.shape == Ht.shape:
+                    P = tf.multiply(P,Ht)
+                    print('multiplied')
+            
+        grad_vars_net=self.optimizer.compute_gradients(pred,var_list=var_list)
+        
         grad_net_list=[]
         for i,(grad, _) in enumerate(grad_vars_net):
             grad_net_list.append(tf.reshape(
@@ -106,11 +147,11 @@ class CON_Optimizer:
 
         P_list=self.P_list
 
-        k_list=[tf.matmul(P, g) for P,g in zip(P_list,grad_net_list)]
+        # k_list=[tf.matmul(P, g) for P,g in zip(P_list,grad_net_list)]
 
-        delta_P_list=[tf.square(tf.cos(self.beta*i)) * tf.divide(tf.matmul(k, tf.transpose(k)), self.alpha *tf.pow(self.gamma,i)+tf.square(tf.cos(self.beta*i))* tf.matmul(tf.transpose(g), k)) for k,g,i in zip(k_list,grad_net_list,list(range(self.n_vars)))]
+        # delta_P_list=[tf.square(tf.cos(self.beta*i)) * tf.divide(tf.matmul(k, tf.transpose(k)), self.alpha *tf.pow(self.gamma,i)+tf.square(tf.cos(self.beta*i))* tf.matmul(tf.transpose(g), k)) for k,g,i in zip(k_list,grad_net_list,list(range(self.n_vars)))]
 
-        P_list = [tf.assign_sub(P, delta_P) for P,delta_P in zip(P_list,delta_P_list)]
+        # P_list = [tf.assign_sub(P, delta_P) for P,delta_P in zip(P_list,delta_P_list)]
 
         op = [tf.assign(self.P_list[i],P_list[i]) for i in range(len(P_list))]+[tf.assign(self.gamma,self.gamma*self.gamma0),tf.assign(self.beta,self.beta+self.beta0),tf.assign(self.n,self.n+1),]
         return op
